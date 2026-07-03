@@ -209,6 +209,11 @@ public class ClientModeImpl extends StateMachine implements ClientMode {
     @VisibleForTesting public static final short NUM_LOG_RECS_VERBOSE = 3000;
 
     private static final String TAG = "WifiClientModeImpl";
+
+    // Broadcom HAL reports this firmware-default as the "factory" MAC; the real
+    // per-device MAC is provisioned into the live interface, so prefer that.
+    private static final MacAddress BROADCOM_DEFAULT_MAC =
+            MacAddress.fromString("00:90:4c:11:22:33");
     // Hardcoded constant used for caller to avoid triggering connect choice that force framework
     // to stick to the selected network. Do not change this value to maintain backward
     // compatibility.
@@ -8052,19 +8057,31 @@ public class ClientModeImpl extends StateMachine implements ClientMode {
         boolean saveFactoryMacInConfigStore =
                 mWifiGlobals.isSaveFactoryMacToConfigStoreEnabled();
         if (saveFactoryMacInConfigStore) {
-            // Already present, just return.
+            // Already present, just return (unless it is the stale Broadcom default).
             String factoryMacAddressStr = mSettingsConfigStore.get(isPrimary()
                     ? WIFI_STA_FACTORY_MAC_ADDRESS : SECONDARY_WIFI_STA_FACTORY_MAC_ADDRESS);
-            if (factoryMacAddressStr != null) return MacAddress.fromString(factoryMacAddressStr);
+            if (factoryMacAddressStr != null) {
+                MacAddress stored = MacAddress.fromString(factoryMacAddressStr);
+                if (!BROADCOM_DEFAULT_MAC.equals(stored)) return stored;
+            }
         }
         MacAddress factoryMacAddress = mWifiNative.getStaFactoryMacAddress(mInterfaceName);
+        if (factoryMacAddress == null || BROADCOM_DEFAULT_MAC.equals(factoryMacAddress)) {
+            String ifaceMac = mWifiNative.getMacAddress(mInterfaceName);
+            if (ifaceMac != null) {
+                MacAddress live = MacAddress.fromString(ifaceMac);
+                if (!BROADCOM_DEFAULT_MAC.equals(live)) {
+                    factoryMacAddress = live;
+                }
+            }
+        }
         if (factoryMacAddress == null) {
             // the device may be running an older HAL (version < 1.3).
             Log.w(TAG, (isPrimary() ? "Primary" : "Secondary")
                     + " failed to retrieve factory MAC address");
             return null;
         }
-        if (saveFactoryMacInConfigStore) {
+        if (saveFactoryMacInConfigStore && !BROADCOM_DEFAULT_MAC.equals(factoryMacAddress)) {
             mSettingsConfigStore.put(isPrimary()
                             ? WIFI_STA_FACTORY_MAC_ADDRESS : SECONDARY_WIFI_STA_FACTORY_MAC_ADDRESS,
                     factoryMacAddress.toString());
