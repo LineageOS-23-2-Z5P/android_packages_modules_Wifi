@@ -7177,10 +7177,13 @@ public class WifiServiceImpl extends IWifiManager.Stub {
             throw new SecurityException("App not allowed to get Wi-Fi factory MAC address "
                     + "(uid = " + uid + ")");
         }
-        // Check the ConfigStore cache first
+        // Check the ConfigStore cache first (ignore the stale Broadcom firmware default).
         if (mWifiGlobals.isSaveFactoryMacToConfigStoreEnabled()) {
             String factoryMacAddressStr = mSettingsConfigStore.get(WIFI_STA_FACTORY_MAC_ADDRESS);
-            if (factoryMacAddressStr != null) return new String[] {factoryMacAddressStr};
+            if (factoryMacAddressStr != null
+                    && !"00:90:4c:11:22:33".equals(factoryMacAddressStr)) {
+                return new String[] {factoryMacAddressStr};
+            }
         }
         String result = mWifiThreadRunner.call(
                 () -> mActiveModeWarden.getPrimaryClientModeManager().getFactoryMacAddress(),

@@ -497,14 +497,17 @@ public class ApConfigUtil {
             useWifiCond = true;
         } else {
             if (!wifiNative.isHalStarted()) {
-                // HAL is not started, return null
-                return null;
-            }
-            regulatoryList = getHalAvailableChannelsForBand(scannerBand, wifiNative, resourceCache,
-                    inFrequencyMHz);
-            if (regulatoryList == null) {
-                // HAL API not supported by HAL, fallback to wificond
-                useWifiCond = true;
+                // HAL not started yet (e.g. WiFi STA off on a fresh boot): don't bail
+                // out with null, which would leave SoftApCapability's 5GHz list empty.
+                // Fall through to the device-configured channel fallback below.
+                regulatoryList = null;
+            } else {
+                regulatoryList = getHalAvailableChannelsForBand(scannerBand, wifiNative,
+                        resourceCache, inFrequencyMHz);
+                if (regulatoryList == null) {
+                    // HAL API not supported by HAL, fallback to wificond
+                    useWifiCond = true;
+                }
             }
         }
         if (useWifiCond) {
@@ -512,8 +515,25 @@ public class ApConfigUtil {
                     resourceCache, inFrequencyMHz);
         }
         List<Integer> configuredList = getConfiguredChannelList(resourceCache, band);
-        if (configuredList == null || configuredList.isEmpty() || regulatoryList == null) {
+        if (configuredList == null || configuredList.isEmpty()) {
+            // No device overlay channel list to fall back to.
             return regulatoryList;
+        }
+        // The bcmdhd vendor HAL never reports a confirmed country code to the
+        // framework (its country callback returns "00"/null), so it hands back a
+        // null/empty SoftAp channel list and the 5GHz band gets greyed out in
+        // Settings. Fall back to the device overlay's configured channels.
+        if (regulatoryList == null || regulatoryList.isEmpty()) {
+            Log.d(TAG, "HAL/wificond returned no " + bandToString(band)
+                    + " channels, falling back to configured list");
+            if (inFrequencyMHz) {
+                List<Integer> fallbackFreqs = new ArrayList<Integer>();
+                for (int channel : configuredList) {
+                    fallbackFreqs.add(convertChannelToFrequency(channel, band));
+                }
+                return fallbackFreqs;
+            }
+            return new ArrayList<Integer>(configuredList);
         }
         List<Integer> filteredList = new ArrayList<Integer>();
         // Otherwise, filter the configured list
